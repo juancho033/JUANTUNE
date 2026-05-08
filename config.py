@@ -1,0 +1,11 @@
+# config.py
+COLOR_FONDO_PRIMARIO = "#0A0B10"
+COLOR_FONDO_SECUNDARIO = "#161822"
+COLOR_ACENTO = "#A855F7"
+COLOR_TEXTO_PRINCIPAL = "#FFFFFF"
+COLOR_TEXTO_SECUNDARIO = "#94A3B8"
+COLOR_BOTON_HOVER = "#7E22CE"
+
+TIPO_FUENTE = "Inter" # O "Segoe UI Variable" en Windows 11
+ANCHO_APP = 1250  # Más ancho para la playlist
+ALTO_APP = 720   # Más alto para lucir la carátula

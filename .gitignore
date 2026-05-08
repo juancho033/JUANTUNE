@@ -1,0 +1,15 @@
+# Entorno virtual
+.venv/
+
+# Build de PyInstaller
+build/
+*.spec
+JuanTune.exe
+
+# Datos personales del usuario (cada uno tiene los suyos en %APPDATA%)
+data/*.json
+
+# Cache de Python
+__pycache__/
+*.pyc
+*.pyo
