@@ -22,29 +22,32 @@ class ReproductorAudio:
 
     def cargar_cancion(self, ruta_archivo):
         if os.path.exists(ruta_archivo):
+            try:
+                audio = MP3(ruta_archivo)
+                duracion = audio.info.length
+            except Exception:
+                return False
             pygame.mixer.music.stop()
             self.cancion_actual = ruta_archivo
             pygame.mixer.music.load(ruta_archivo)
             self.posicion_base = 0
             self.en_pausa = False
-            # Obtener duración
-            audio = MP3(ruta_archivo)
-            self.duracion = audio.info.length
-            # Iniciar tiempo
+            self.duracion = duracion
             self.tiempo_inicio_reproduccion = time.time()
             return True
         return False
 
     def reproducir(self):
         if self.en_pausa:
-            pygame.mixer.music.unpause()
+            pygame.mixer.music.play(0, self.posicion_base)
         else:
             pygame.mixer.music.play()
+            self.posicion_base = 0
         self.en_pausa = False
-        # Actualizar tiempo de inicio
-        self.tiempo_inicio_reproduccion = time.time()
+        self.tiempo_inicio_reproduccion = time.time() - self.posicion_base
 
     def pausar(self):
+        self.posicion_base = self.obtener_tiempo_actual()
         pygame.mixer.music.pause()
         self.en_pausa = True
 
@@ -74,9 +77,13 @@ class ReproductorAudio:
 
     def obtener_info(self):
         if self.cancion_actual:
-            audio = MP3(self.cancion_actual)
+            try:
+                audio = MP3(self.cancion_actual)
+                duracion = audio.info.length
+            except Exception:
+                duracion = 0
             return {
-                "duracion": audio.info.length,
+                "duracion": duracion,
                 "nombre": os.path.basename(self.cancion_actual).replace(".mp3", "")
             }
         return None

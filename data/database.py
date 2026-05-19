@@ -54,3 +54,13 @@ def eliminar_playlist(nombre):
     data = cargar_playlists()
     data["playlists"] = [p for p in data["playlists"] if p["name"] != nombre]
     guardar_playlists(data)
+
+def eliminar_cancion_playlist(nombre_playlist, ruta_cancion):
+    """Elimina una canción de una playlist."""
+    data = cargar_playlists()
+    for p in data["playlists"]:
+        if p["name"] == nombre_playlist:
+            if ruta_cancion in p["songs"]:
+                p["songs"].remove(ruta_cancion)
+            break
+    guardar_playlists(data)
