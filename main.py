@@ -59,6 +59,16 @@ class JuanTuneApp(ctk.CTk):
         self.crear_home()
         self.frame_home.pack(fill="both", expand=True)
 
+        # Frame Explorar (próximamente)
+        self.frame_explorar = ctk.CTkFrame(self.frame_main_scroll, fg_color="transparent")
+        ctk.CTkLabel(self.frame_explorar, text="🧭  Explorar", font=(TIPO_FUENTE, 28, "bold"),
+                     text_color=COLOR_ACENTO).pack(pady=(80, 10))
+        ctk.CTkLabel(self.frame_explorar, text="Próximamente...", font=(TIPO_FUENTE, 16),
+                     text_color=COLOR_TEXTO_SECUNDARIO).pack()
+        ctk.CTkLabel(self.frame_explorar, text="Estamos trabajando para traerte\nuna experiencia de descubrimiento musical.",
+                     font=(TIPO_FUENTE, 12), text_color=COLOR_TEXTO_SECUNDARIO,
+                     justify="center").pack(pady=(20, 0))
+
         # Frame para lista de canciones (se muestra al seleccionar playlist)
         self.frame_lista = ctk.CTkFrame(self.frame_main_scroll, fg_color="transparent")
         self.scroll_playlist = ctk.CTkScrollableFrame(self.frame_lista, fg_color="transparent",
@@ -163,6 +173,10 @@ class JuanTuneApp(ctk.CTk):
         ctk.CTkButton(frame_nav, text="🏠  Inicio", anchor="w", font=(TIPO_FUENTE, 14),
                       fg_color="transparent", hover_color=COLOR_FONDO_PRIMARIO,
                       command=lambda: self.mostrar_vista("home")).pack(fill="x", pady=1)
+
+        ctk.CTkButton(frame_nav, text="🧭  Explorar", anchor="w", font=(TIPO_FUENTE, 14),
+                      fg_color="transparent", hover_color=COLOR_FONDO_PRIMARIO,
+                      command=lambda: self.mostrar_vista("explorar")).pack(fill="x", pady=1)
 
         ctk.CTkButton(frame_nav, text="📚  Biblioteca", anchor="w", font=(TIPO_FUENTE, 14),
                       fg_color="transparent", hover_color=COLOR_FONDO_PRIMARIO,
@@ -548,12 +562,14 @@ class JuanTuneApp(ctk.CTk):
             añadir_reciente(ruta)
 
     def mostrar_vista(self, vista):
-        """Cambia entre vistas del contenido principal: 'home' o 'biblioteca'."""
+        """Cambia entre vistas: 'home', 'biblioteca' o 'explorar'."""
+        for f in (self.frame_home, self.frame_lista, self.frame_explorar):
+            f.pack_forget()
         if vista == "home":
-            self.frame_lista.pack_forget()
             self.frame_home.pack(fill="both", expand=True)
+        elif vista == "explorar":
+            self.frame_explorar.pack(fill="both", expand=True)
         else:
-            self.frame_home.pack_forget()
             if not self.current_playlist_name:
                 self.crear_biblioteca()
             self.frame_lista.pack(fill="both", expand=True)
@@ -753,6 +769,7 @@ class JuanTuneApp(ctk.CTk):
             if tiempo >= self.duracion_actual - 0.2:
                 self._flush_stats()
                 self.siguiente_cancion()
+                return  # ⚠ nueva canción ya arrancó su propio timer
         
         self.after(500, self.actualizar_barra_tiempo)
 
@@ -818,7 +835,11 @@ class JuanTuneApp(ctk.CTk):
     def salir_playlist(self):
         """Sale del modo playlist y vuelve a la biblioteca."""
         self.current_playlist_name = None
-        self.playlist = []
+        if self.reproductor.cancion_actual:
+            self.playlist = [self.reproductor.cancion_actual]
+            self.indice_actual = 0
+        else:
+            self.playlist = []
         self.btn_salir_playlist.configure(state="disabled")
         self.mostrar_vista("biblioteca")
 
@@ -917,9 +938,21 @@ class JuanTuneApp(ctk.CTk):
         if self.current_playlist_name:
             from data.database import eliminar_cancion_playlist
             eliminar_cancion_playlist(self.current_playlist_name, ruta)
-            if ruta in self.playlist:
-                self.playlist.remove(ruta)
             self.cargar_playlist_a_ui(self.current_playlist_name)
+            # Reajustar índice si la canción actual sigue en la playlist
+            if self.reproductor.cancion_actual:
+                ruta_actual = self.reproductor.cancion_actual
+                if ruta_actual in self.playlist:
+                    self.indice_actual = self.playlist.index(ruta_actual)
+                elif ruta_actual == ruta:
+                    # La canción eliminada era la que sonaba; parar y resetear
+                    self.reproductor.pausar()
+                    self.btn_play.configure(text="▶")
+                    self.lbl_titulo.configure(text="")
+                    self.lbl_artista.configure(text="")
+                    self.img_caratula.configure(image=None, text="🎵")
+                    self._stats_ruta = None
+                    self._stats_tiempo = 0.0
 
     def limpiar_ui_playlist(self):
         """Elimina todos los botones de canciones en la UI."""
