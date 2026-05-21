@@ -211,7 +211,7 @@ class JuanTuneApp(ctk.CTk):
             btn.pack(fill="x", pady=1)
 
     def crear_bottom_bar(self):
-        """Barra inferior de reproducción (estilo Spotify)."""
+        """Barra inferior de reproducción (estilo Spotify v1.2)."""
         self.frame_bottom = ctk.CTkFrame(self, fg_color=COLOR_FONDO_SECUNDARIO, height=80, corner_radius=0)
         self.frame_bottom.grid(row=1, column=0, columnspan=2, sticky="ew")
         self.frame_bottom.grid_propagate(False)
@@ -220,9 +220,9 @@ class JuanTuneApp(ctk.CTk):
         self.frame_bottom.grid_columnconfigure(1, weight=2)
         self.frame_bottom.grid_columnconfigure(2, weight=1)
 
-        # LEFT: Mini album art + title
+        # ─── LEFT: Album art + Title/Artist + Add ───────────────────────
         frame_left = ctk.CTkFrame(self.frame_bottom, fg_color="transparent")
-        frame_left.grid(row=0, column=0, sticky="w", padx=15)
+        frame_left.grid(row=0, column=0, sticky="w", padx=(12, 5))
 
         self.img_caratula = ctk.CTkLabel(frame_left, text="🎵", font=("Arial", 20),
                                          width=56, height=56, fg_color=COLOR_FONDO_PRIMARIO,
@@ -230,123 +230,181 @@ class JuanTuneApp(ctk.CTk):
         self.img_caratula.pack(side="left", padx=(0, 10))
 
         frame_info = ctk.CTkFrame(frame_left, fg_color="transparent")
-        frame_info.pack(side="left")
+        frame_info.pack(side="left", fill="x", expand=True)
 
         self.lbl_titulo = ctk.CTkLabel(frame_info, text="", font=(TIPO_FUENTE, 13, "bold"),
                                        anchor="w")
         self.lbl_titulo.pack(anchor="w")
 
-        self.lbl_subtitulo = ctk.CTkLabel(frame_info, text="Sin reproducción", font=(TIPO_FUENTE, 11),
-                                          text_color=COLOR_TEXTO_SECUNDARIO, anchor="w")
-        self.lbl_subtitulo.pack(anchor="w")
+        self.lbl_artista = ctk.CTkLabel(frame_info, text="", font=(TIPO_FUENTE, 11),
+                                        text_color=COLOR_TEXTO_SECUNDARIO, anchor="w")
+        self.lbl_artista.pack(anchor="w")
 
-        # CENTER: Controls + progress
+        # ─── CENTER: Controls + Progress ────────────────────────────────
         frame_center = ctk.CTkFrame(self.frame_bottom, fg_color="transparent")
         frame_center.grid(row=0, column=1, sticky="nsew")
 
         frame_btns = ctk.CTkFrame(frame_center, fg_color="transparent")
-        frame_btns.pack(pady=(6, 2))
+        frame_btns.pack(pady=(8, 2))
 
         self.btn_shuffle = ctk.CTkButton(frame_btns, text="🔀", width=30, height=30, corner_radius=15,
-                                          fg_color="transparent", hover=False, font=("Arial", 12),
+                                          fg_color="transparent", hover=False, font=("Arial", 11),
                                           command=self.toggle_shuffle)
-        self.btn_shuffle.pack(side="left", padx=4)
+        self.btn_shuffle.pack(side="left", padx=6)
 
-        ctk.CTkButton(frame_btns, text="⏮", width=32, height=32, corner_radius=16,
-                      fg_color="transparent", hover=False, font=("Arial", 14),
-                      command=self.anterior_cancion).pack(side="left", padx=4)
+        ctk.CTkButton(frame_btns, text="⏮", width=30, height=30, corner_radius=15,
+                      fg_color="transparent", hover=False, font=("Arial", 13),
+                      command=self.anterior_cancion).pack(side="left", padx=6)
 
-        self.btn_play = ctk.CTkButton(frame_btns, text="▶", width=40, height=40, corner_radius=20,
-                                       fg_color=COLOR_ACENTO, hover_color=COLOR_BOTON_HOVER,
-                                       font=("Arial", 18), command=self.click_play)
-        self.btn_play.pack(side="left", padx=8)
+        self.btn_play = ctk.CTkButton(frame_btns, text="▶", width=36, height=36, corner_radius=18,
+                                       fg_color="#FFFFFF", hover_color="#E0E0E0",
+                                       text_color="#000000", font=("Arial", 14),
+                                       command=self.click_play)
+        self.btn_play.pack(side="left", padx=6)
 
-        ctk.CTkButton(frame_btns, text="⏭", width=32, height=32, corner_radius=16,
-                      fg_color="transparent", hover=False, font=("Arial", 14),
-                      command=self.siguiente_cancion).pack(side="left", padx=4)
+        self.lbl_subtitulo = ctk.CTkLabel(frame_btns, text="", font=(TIPO_FUENTE, 11),
+                                          text_color=COLOR_TEXTO_SECUNDARIO, anchor="w")
+        self.lbl_subtitulo.pack(side="left", padx=4)
+
+        ctk.CTkButton(frame_btns, text="⏭", width=30, height=30, corner_radius=15,
+                      fg_color="transparent", hover=False, font=("Arial", 13),
+                      command=self.siguiente_cancion).pack(side="left", padx=6)
 
         self.btn_repeat = ctk.CTkButton(frame_btns, text="🔁", width=30, height=30, corner_radius=15,
-                                         fg_color="transparent", hover=False, font=("Arial", 12),
+                                         fg_color="transparent", hover=False, font=("Arial", 11),
                                          command=self.toggle_repeat)
-        self.btn_repeat.pack(side="left", padx=4)
+        self.btn_repeat.pack(side="left", padx=6)
 
+        # Progress row
         frame_progress = ctk.CTkFrame(frame_center, fg_color="transparent")
-        frame_progress.pack(fill="x", padx=30, pady=(0, 2))
+        frame_progress.pack(fill="x", padx=20, pady=(0, 2))
 
         self.lbl_tiempo_actual = ctk.CTkLabel(frame_progress, text="0:00", font=(TIPO_FUENTE, 10),
-                                               text_color=COLOR_TEXTO_SECUNDARIO, width=35)
+                                               text_color=COLOR_TEXTO_SECUNDARIO, width=32)
         self.lbl_tiempo_actual.pack(side="left")
 
-        self.slider_progreso = ctk.CTkSlider(frame_progress, from_=0, to=100, height=6,
-                                               button_length=18, button_corner_radius=9,
+        self.slider_progreso = ctk.CTkSlider(frame_progress, from_=0, to=100, height=4,
+                                               button_length=14, button_corner_radius=7,
                                                button_color=COLOR_ACENTO, progress_color=COLOR_ACENTO,
                                                button_hover_color=COLOR_BOTON_HOVER, hover=False)
-        self.slider_progreso.pack(side="left", fill="x", expand=True, padx=5)
+        self.slider_progreso.pack(side="left", fill="x", expand=True, padx=6)
         self.slider_progreso.set(0)
         self.slider_progreso.bind("<ButtonPress-1>", self.slider_press)
         self.slider_progreso.bind("<ButtonRelease-1>", self.slider_release)
 
         self.lbl_tiempo_total = ctk.CTkLabel(frame_progress, text="0:00", font=(TIPO_FUENTE, 10),
-                                              text_color=COLOR_TEXTO_SECUNDARIO, width=35)
+                                              text_color=COLOR_TEXTO_SECUNDARIO, width=32)
         self.lbl_tiempo_total.pack(side="left")
 
-        # RIGHT: Volume
+        # ─── RIGHT: Tools + Volume ──────────────────────────────────────
         frame_right = ctk.CTkFrame(self.frame_bottom, fg_color="transparent")
-        frame_right.grid(row=0, column=2, sticky="e", padx=15)
+        frame_right.grid(row=0, column=2, sticky="e", padx=(5, 12))
 
-        ctk.CTkLabel(frame_right, text="🔊", font=("Arial", 12)).pack(side="left", padx=(0, 5))
+        ctk.CTkLabel(frame_right, text="🔊", font=("Arial", 11),
+                     text_color=COLOR_TEXTO_SECUNDARIO).pack(side="left", padx=(0, 4))
 
         self.slider_volumen = ctk.CTkSlider(frame_right, from_=0, to=100, height=4,
                                              button_color=COLOR_ACENTO, progress_color=COLOR_ACENTO,
                                              button_hover_color=COLOR_BOTON_HOVER,
-                                             command=self.cambiar_volumen, width=100)
+                                             command=self.cambiar_volumen, width=80)
         self.slider_volumen.pack(side="left")
         self.slider_volumen.set(50)
 
-        self.lbl_volumen = ctk.CTkLabel(frame_right, text="50%", font=(TIPO_FUENTE, 11),
-                                         text_color=COLOR_TEXTO_SECUNDARIO, width=30)
-        self.lbl_volumen.pack(side="left", padx=(5, 0))
-
     def crear_panel_playlist(self):
-        """Configura la vista de playlist en el área principal."""
+        """Vista tipo Spotify: cabecera con arte + tabla de canciones."""
         for widget in self.frame_lista.winfo_children():
             widget.destroy()
 
-        # Header con nombre de playlist
-        frame_header = ctk.CTkFrame(self.frame_lista, fg_color="transparent")
-        frame_header.pack(fill="x", padx=30, pady=(30, 10))
+        canciones = obtener_canciones_playlist(self.current_playlist_name or "")
 
-        lbl = ctk.CTkLabel(frame_header, text=self.current_playlist_name or "Playlist",
-                           font=(TIPO_FUENTE, 24, "bold"), text_color=COLOR_ACENTO)
-        lbl.pack(side="left")
+        # ─── HEADER (simula degradado con fondo secundario) ────────────
+        frame_header = ctk.CTkFrame(self.frame_lista, fg_color=COLOR_FONDO_SECUNDARIO, corner_radius=0)
+        frame_header.pack(fill="x")
 
-        btn_back = ctk.CTkButton(frame_header, text="← Volver", fg_color="transparent",
-                                 hover_color=COLOR_FONDO_SECUNDARIO, font=(TIPO_FUENTE, 13),
-                                 command=self.salir_playlist, width=80)
-        btn_back.pack(side="right", padx=(0, 5))
+        h_inner = ctk.CTkFrame(frame_header, fg_color="transparent")
+        h_inner.pack(fill="x", padx=30, pady=(25, 20))
 
-        btn_del = ctk.CTkButton(frame_header, text="Eliminar", fg_color="transparent",
-                                hover_color=COLOR_FONDO_SECUNDARIO, text_color="#FF5555",
-                                font=(TIPO_FUENTE, 13), command=self.eliminar_playlist_actual)
-        btn_del.pack(side="right", padx=(0, 5))
+        # Large album art
+        lbl_album_img = ctk.CTkLabel(h_inner, text="📀", font=("Arial", 48),
+                                     width=160, height=160, fg_color=COLOR_FONDO_PRIMARIO,
+                                     corner_radius=8)
+        lbl_album_img.pack(side="left", padx=(0, 20))
 
-        # Acciones
+        # Try to show album art of the first song
+        if canciones:
+            try:
+                from mutagen.id3 import ID3, APIC
+                audio = ID3(canciones[0])
+                for tag in audio.values():
+                    if isinstance(tag, APIC):
+                        img = Image.open(io.BytesIO(tag.data))
+                        img.thumbnail((160, 160))
+                        img_ctk = ctk.CTkImage(light_image=img, dark_image=img, size=(160, 160))
+                        lbl_album_img.configure(image=img_ctk, text="")
+                        break
+            except:
+                pass
+
+        # Metadata right of album art
+        frame_meta = ctk.CTkFrame(h_inner, fg_color="transparent")
+        frame_meta.pack(side="left", fill="x", expand=True)
+
+        ctk.CTkLabel(frame_meta, text="PLAYLIST",
+                     font=(TIPO_FUENTE, 10, "bold"),
+                     text_color=COLOR_TEXTO_SECUNDARIO).pack(anchor="w")
+
+        ctk.CTkLabel(frame_meta, text=self.current_playlist_name or "Playlist",
+                     font=(TIPO_FUENTE, 28, "bold"),
+                     text_color=COLOR_TEXTO_PRINCIPAL).pack(anchor="w", pady=(4, 0))
+
+        ctk.CTkLabel(frame_meta, text=f"{len(canciones)} canciones",
+                     font=(TIPO_FUENTE, 12),
+                     text_color=COLOR_TEXTO_SECUNDARIO).pack(anchor="w", pady=(6, 0))
+
+        # Back / Delete buttons
+        frame_btn_hdr = ctk.CTkFrame(frame_meta, fg_color="transparent")
+        frame_btn_hdr.pack(anchor="w", pady=(10, 0))
+        ctk.CTkButton(frame_btn_hdr, text="← Volver", fg_color="transparent",
+                      hover_color=COLOR_FONDO_PRIMARIO, font=(TIPO_FUENTE, 12),
+                      command=self.salir_playlist, width=70).pack(side="left", padx=(0, 5))
+        ctk.CTkButton(frame_btn_hdr, text="Eliminar", fg_color="transparent",
+                      hover_color=COLOR_FONDO_PRIMARIO, text_color="#FF5555",
+                      font=(TIPO_FUENTE, 12), command=self.eliminar_playlist_actual).pack(side="left")
+
+        # ─── ACTION BAR ──────────────────────────────────────────────────
         frame_acc = ctk.CTkFrame(self.frame_lista, fg_color="transparent")
-        frame_acc.pack(fill="x", padx=30, pady=(0, 15))
+        frame_acc.pack(fill="x", padx=24, pady=(12, 6))
 
-        ctk.CTkButton(frame_acc, text="+ Añadir Carpeta", fg_color="transparent",
-                      hover_color=COLOR_FONDO_SECUNDARIO, font=(TIPO_FUENTE, 13),
-                      command=self.cargar_carpeta).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(frame_acc, text="▶", width=44, height=44, corner_radius=22,
+                      fg_color=COLOR_ACENTO, hover_color=COLOR_BOTON_HOVER,
+                      font=("Arial", 18), command=lambda: self._reproducir_primera()).pack(side="left")
 
-        ctk.CTkButton(frame_acc, text="+ Añadir Canción", fg_color="transparent",
-                      hover_color=COLOR_FONDO_SECUNDARIO, font=(TIPO_FUENTE, 13),
-                      command=self.cargar_archivo_solo).pack(side="left")
+        ctk.CTkButton(frame_acc, text="+ Añadir", fg_color="transparent",
+                      hover_color=COLOR_FONDO_SECUNDARIO, font=(TIPO_FUENTE, 12),
+                      command=self.cargar_archivo_solo).pack(side="left", padx=(16, 4))
 
-        # Lista de canciones
+        ctk.CTkButton(frame_acc, text="📂 Carpeta", fg_color="transparent",
+                      hover_color=COLOR_FONDO_SECUNDARIO, font=(TIPO_FUENTE, 12),
+                      command=self.cargar_carpeta).pack(side="left", padx=4)
+
+        # ─── SONG TABLE ──────────────────────────────────────────────────
         self.scroll_playlist = ctk.CTkScrollableFrame(self.frame_lista, fg_color="transparent",
                                                        scrollbar_button_color=COLOR_ACENTO,
-                                                       scrollbar_button_hover_color=COLOR_BOTON_HOVER)
-        self.scroll_playlist.pack(fill="both", expand=True, padx=30, pady=(0, 30))
+                                                       scrollbar_button_hover_color=COLOR_BOTON_HOVER,
+                                                       corner_radius=0)
+        self.scroll_playlist.pack(fill="both", expand=True, padx=0, pady=0)
+
+        # Column headers
+        frame_cols = ctk.CTkFrame(self.scroll_playlist, fg_color="transparent")
+        frame_cols.pack(fill="x", padx=20, pady=(8, 2))
+        ctk.CTkLabel(frame_cols, text="#", font=(TIPO_FUENTE, 10, "bold"),
+                     text_color=COLOR_TEXTO_SECUNDARIO, width=30).pack(side="left")
+        ctk.CTkLabel(frame_cols, text="Título", font=(TIPO_FUENTE, 10, "bold"),
+                     text_color=COLOR_TEXTO_SECUNDARIO, anchor="w").pack(side="left", fill="x", expand=True, padx=(4, 0))
+        ctk.CTkLabel(frame_cols, text="⏱", font=(TIPO_FUENTE, 10),
+                     text_color=COLOR_TEXTO_SECUNDARIO, width=40).pack(side="right")
+
+        ctk.CTkFrame(self.scroll_playlist, height=1, fg_color="#333333").pack(fill="x", padx=20, pady=2)
 
         if self.current_playlist_name:
             self.cargar_playlist_a_ui(self.current_playlist_name)
@@ -382,33 +440,79 @@ class JuanTuneApp(ctk.CTk):
             pass
         return None
 
+    def _reproducir_primera(self):
+        if self.playlist:
+            self.seleccionar_cancion(self.playlist[0])
+
+    def _formatear_duracion(self, ruta):
+        try:
+            from mutagen.mp3 import MP3
+            audio = MP3(ruta)
+            segs = int(audio.info.length)
+            return f"{segs // 60}:{segs % 60:02d}"
+        except:
+            return "0:00"
+
     def añadir_a_playlist_ui(self, ruta):
+        """Añade una fila tipo tabla: # | thumbnail | título | artista | duración | ✕"""
         nombre = os.path.basename(ruta).replace(".mp3", "")
-        nombre_truncado = (nombre[:35] + '...') if len(nombre) > 35 else nombre
-        frame_song = ctk.CTkFrame(self.scroll_playlist, fg_color="transparent")
-        frame_song.pack(fill="x", pady=1)
+        nombre_trunc = (nombre[:32] + '...') if len(nombre) > 32 else nombre
+
+        frame_song = ctk.CTkFrame(self.scroll_playlist, fg_color="transparent", height=44)
+        frame_song.pack(fill="x", pady=0)
+        frame_song.pack_propagate(False)
+
+        # Hover: change bg color
+        def on_enter(e, f=frame_song): f.configure(fg_color="#2A2A2A")
+        def on_leave(e, f=frame_song): f.configure(fg_color="transparent")
+        frame_song.bind("<Enter>", on_enter)
+        frame_song.bind("<Leave>", on_leave)
+
+        # Número de fila
+        ctk.CTkLabel(frame_song, text=str(self.playlist.index(ruta) + 1),
+                     font=(TIPO_FUENTE, 11), text_color=COLOR_TEXTO_SECUNDARIO,
+                     width=30).pack(side="left")
 
         # Mini carátula
-        img_ctk = self._obtener_mini_caratula(ruta)
+        img_ctk = self._obtener_mini_caratula(ruta, size=28)
         lbl_img = ctk.CTkLabel(frame_song, text="🎵" if not img_ctk else "",
-                               image=img_ctk, font=("Arial", 16),
-                               width=36, height=36, fg_color=COLOR_FONDO_PRIMARIO, corner_radius=4)
-        lbl_img.pack(side="left", padx=(4, 8))
+                               image=img_ctk, font=("Arial", 12),
+                               width=32, height=32, fg_color=COLOR_FONDO_PRIMARIO, corner_radius=3)
+        lbl_img.pack(side="left", padx=(2, 8))
 
-        # Botón de canción
-        btn_song = ctk.CTkButton(frame_song, text=nombre_truncado, anchor="w",
-                                 fg_color="transparent", hover_color=COLOR_FONDO_PRIMARIO,
-                                 font=(TIPO_FUENTE, 13),
+        # Título + artista
+        frame_info = ctk.CTkFrame(frame_song, fg_color="transparent")
+        frame_info.pack(side="left", fill="x", expand=True)
+
+        btn_song = ctk.CTkButton(frame_info, text=nombre_trunc, anchor="w",
+                                 fg_color="transparent", hover_color="#2A2A2A",
+                                 font=(TIPO_FUENTE, 12, "bold"),
                                  command=lambda r=ruta: self.seleccionar_cancion(r))
-        btn_song.pack(side="left", fill="x", expand=True, ipady=6)
+        btn_song.pack(fill="x", ipady=1)
 
-        # Botón eliminar (solo si hay una playlist con nombre)
+        # Artista (if available)
+        try:
+            from mutagen.id3 import ID3
+            tags = ID3(ruta)
+            artista = str(tags.get("TPE1", ""))
+        except:
+            artista = ""
+        if artista:
+            ctk.CTkLabel(frame_info, text=artista, font=(TIPO_FUENTE, 10),
+                         text_color=COLOR_TEXTO_SECUNDARIO, anchor="w").pack(fill="x")
+
+        # Duración
+        ctk.CTkLabel(frame_song, text=self._formatear_duracion(ruta),
+                     font=(TIPO_FUENTE, 11), text_color=COLOR_TEXTO_SECUNDARIO,
+                     width=40).pack(side="right")
+
+        # Botón eliminar (solo si hay playlist con nombre)
         if self.current_playlist_name:
-            btn_remove = ctk.CTkButton(frame_song, text="✕", width=28,
-                                       fg_color="transparent", hover_color=COLOR_FONDO_PRIMARIO,
-                                       font=(TIPO_FUENTE, 12), text_color="#FF5555",
+            btn_remove = ctk.CTkButton(frame_song, text="✕", width=24,
+                                       fg_color="transparent", hover_color="#3A3A3A",
+                                       font=(TIPO_FUENTE, 10), text_color="#FF5555",
                                        command=lambda r=ruta: self.eliminar_cancion_de_playlist(r))
-            btn_remove.pack(side="right", padx=(4, 4))
+            btn_remove.pack(side="right", padx=(2, 4))
 
     def seleccionar_cancion(self, ruta):
         # Guardar tiempo acumulado de la canción anterior
@@ -418,7 +522,9 @@ class JuanTuneApp(ctk.CTk):
             self.indice_actual = self.playlist.index(ruta)
         if self.reproductor.cargar_cancion(ruta):
             info = self.reproductor.obtener_info()
-            self.lbl_titulo.configure(text=(info['nombre'][:35] + '...') if len(info['nombre']) > 35 else info['nombre'])
+            nombre_trunc = (info['nombre'][:40] + '...') if len(info['nombre']) > 40 else info['nombre']
+            self.lbl_titulo.configure(text=nombre_trunc)
+            self.lbl_artista.configure(text=info.get('artista', ''))
             self.duracion_actual = info['duracion']
             self.slider_progreso.configure(to=info['duracion'])
             self.slider_progreso.set(0)
@@ -431,7 +537,6 @@ class JuanTuneApp(ctk.CTk):
             else:
                 self.img_caratula.configure(image=None, text="🎵")
 
-            # Empezar a trackear la nueva canción
             self._stats_ruta = ruta
             self._stats_tiempo = 0.0
 
@@ -498,7 +603,9 @@ class JuanTuneApp(ctk.CTk):
             self.reproductor.pausar()
             self.btn_play.configure(text="▶")
         self.mostrar_vista("home")
-        self.lbl_subtitulo.configure(text="Sin reproducción")
+        self.lbl_titulo.configure(text="")
+        self.lbl_artista.configure(text="")
+        self.img_caratula.configure(image=None, text="🎵")
 
     def seleccionar_desde_home(self, ruta):
         """Selecciona canción desde una tarjeta del dashboard."""

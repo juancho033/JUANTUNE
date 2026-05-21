@@ -82,9 +82,15 @@ class ReproductorAudio:
                 duracion = audio.info.length
             except Exception:
                 duracion = 0
+            try:
+                tags = ID3(self.cancion_actual)
+                artista = str(tags.get("TPE1", "Artista Desconocido"))
+            except:
+                artista = "Artista Desconocido"
             return {
                 "duracion": duracion,
-                "nombre": os.path.basename(self.cancion_actual).replace(".mp3", "")
+                "nombre": os.path.basename(self.cancion_actual).replace(".mp3", ""),
+                "artista": artista
             }
         return None
 
