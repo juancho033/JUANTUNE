@@ -13,3 +13,9 @@ data/*.json
 __pycache__/
 *.pyc
 *.pyo
+
+# Credenciales y configuracion de servicios cloud (PRIVADO - no compartir)
+cloudinary_config.json
+firebase_config.json
+drive_oauth.json
+drive_token.json

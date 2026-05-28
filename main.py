@@ -2,13 +2,20 @@
 import customtkinter as ctk
 import pygame
 import random
+import os
+import io
+import threading
 from config import *
 from core.player import ReproductorAudio
 from data.database import *
+from data.recent import cargar_recientes, añadir_reciente, obtener_info_reciente
+from data.stats import cargar_stats, registrar_reproduccion, obtener_top, total_plays, total_time, unique_songs
 from tkinter import filedialog, messagebox
-from PIL import Image, ImageTk
-import os
-import io
+from PIL import Image
+from mutagen.mp3 import MP3
+from mutagen.id3 import ID3, APIC
+from services.firebase_service import get_all_songs
+from services.stream_cache import download_async, get_cached_path, is_cached
 
 class JuanTuneApp(ctk.CTk):
     def __init__(self):
@@ -19,7 +26,7 @@ class JuanTuneApp(ctk.CTk):
         self.configure(fg_color=COLOR_FONDO_PRIMARIO)
         try:
             self.iconbitmap("assets/icons/logo-ico.ico")
-        except:
+        except Exception:
             pass
 
         self.reproductor = ReproductorAudio()
@@ -31,9 +38,14 @@ class JuanTuneApp(ctk.CTk):
         self.repeat_mode = False
         self.current_playlist_name = None
         self.playlists_data = cargar_playlists()
-        self._timer_siguiente = None  # Timer para pasar a siguiente canción
+        self._timer_siguiente = None
         self._stats_ruta = None
         self._stats_tiempo = 0.0
+        self.cloud_songs = []
+        self._cloud_playing = False
+        self._current_download_url = None
+        self._caratula_img = None
+        self._imgs = []  # hold CTkImage refs alive to prevent tkinter GC
 
         # Layout: 3 secciones (sidebar, contenido, barra inferior)
         self.grid_columnconfigure(0, weight=0)
@@ -59,15 +71,8 @@ class JuanTuneApp(ctk.CTk):
         self.crear_home()
         self.frame_home.pack(fill="both", expand=True)
 
-        # Frame Explorar (próximamente)
+        # Frame Explorar (canciones en la nube)
         self.frame_explorar = ctk.CTkFrame(self.frame_main_scroll, fg_color="transparent")
-        ctk.CTkLabel(self.frame_explorar, text="🧭  Explorar", font=(TIPO_FUENTE, 28, "bold"),
-                     text_color=COLOR_ACENTO).pack(pady=(80, 10))
-        ctk.CTkLabel(self.frame_explorar, text="Próximamente...", font=(TIPO_FUENTE, 16),
-                     text_color=COLOR_TEXTO_SECUNDARIO).pack()
-        ctk.CTkLabel(self.frame_explorar, text="Estamos trabajando para traerte\nuna experiencia de descubrimiento musical.",
-                     font=(TIPO_FUENTE, 12), text_color=COLOR_TEXTO_SECUNDARIO,
-                     justify="center").pack(pady=(20, 0))
 
         # Frame para lista de canciones (se muestra al seleccionar playlist)
         self.frame_lista = ctk.CTkFrame(self.frame_main_scroll, fg_color="transparent")
@@ -81,8 +86,6 @@ class JuanTuneApp(ctk.CTk):
 
     def crear_home(self):
         """Dashboard de inicio con accesos rápidos y recientes."""
-        from data.recent import cargar_recientes
-
         ctk.CTkLabel(self.frame_home, text="JuanTune", font=(TIPO_FUENTE, 36, "bold"),
                      text_color=COLOR_ACENTO).pack(pady=(30, 5))
         ctk.CTkLabel(self.frame_home, text="Tu reproductor musical", font=(TIPO_FUENTE, 14),
@@ -113,10 +116,16 @@ class JuanTuneApp(ctk.CTk):
             frame_grid = ctk.CTkScrollableFrame(self.frame_home, fg_color="transparent")
             frame_grid.pack(fill="both", expand=True, padx=20, pady=(0, 10))
 
-            def crear_card_reciente(contenedor, ruta):
+            def crear_card_reciente(contenedor, entry):
+                ruta, titulo, artista = obtener_info_reciente(entry)
                 if not os.path.exists(ruta):
                     return
-                nombre = os.path.basename(ruta).replace(".mp3", "")
+                if not titulo:
+                    cloud_data = self._cloud_song_desde_cache(ruta)
+                    if cloud_data:
+                        titulo = cloud_data.get("title", "")
+                        artista = artista or cloud_data.get("artist", cloud_data.get("uploaded_by", ""))
+                nombre = titulo or os.path.basename(ruta).replace(".mp3", "")
                 card = ctk.CTkFrame(contenedor, fg_color=COLOR_FONDO_SECUNDARIO,
                                     corner_radius=12, height=200)
                 card.pack(fill="x", padx=5, pady=5)
@@ -130,20 +139,23 @@ class JuanTuneApp(ctk.CTk):
                 img_label.pack(pady=(5, 5))
 
                 try:
-                    from core.player import ReproductorAudio
-                    r = ReproductorAudio()
-                    r.cancion_actual = ruta
-                    img = r.obtener_caratula()
-                    if img:
-                        img.thumbnail((120, 120))
-                        img_ctk = ctk.CTkImage(light_image=img, dark_image=img, size=(120, 120))
-                        img_label.configure(image=img_ctk, text="")
-                except:
-                    pass
+                    audio = ID3(ruta)
+                    for tag in audio.values():
+                        if isinstance(tag, APIC):
+                            img = Image.open(io.BytesIO(tag.data))
+                            img.thumbnail((120, 120))
+                            img_ctk = ctk.CTkImage(light_image=img, dark_image=img, size=(120, 120))
+                            img_label.configure(image=img_ctk, text="")
+                            break
+                except Exception as e:
+                    print(f"Album art error: {e}")
 
                 nombre_trunc = (nombre[:20] + '...') if len(nombre) > 20 else nombre
                 ctk.CTkLabel(frame_img_texto, text=nombre_trunc, font=(TIPO_FUENTE, 12),
                              wraplength=160).pack(pady=(0, 3))
+                if artista:
+                    ctk.CTkLabel(frame_img_texto, text=artista, font=(TIPO_FUENTE, 10),
+                                 text_color=COLOR_TEXTO_SECUNDARIO).pack()
 
                 card.bind("<Button-1>", lambda e, r=ruta: self.seleccionar_desde_home(r))
                 img_label.bind("<Button-1>", lambda e, r=ruta: self.seleccionar_desde_home(r))
@@ -310,17 +322,26 @@ class JuanTuneApp(ctk.CTk):
                                               text_color=COLOR_TEXTO_SECUNDARIO, width=32)
         self.lbl_tiempo_total.pack(side="left")
 
-        # ─── RIGHT: Tools + Volume ──────────────────────────────────────
+        # ─── RIGHT: Download + Volume ──────────────────────────────────
         frame_right = ctk.CTkFrame(self.frame_bottom, fg_color="transparent")
         frame_right.grid(row=0, column=2, sticky="e", padx=(5, 12))
+
+        self.btn_download = ctk.CTkButton(frame_right, text="⬇️", width=32, height=32,
+                                           corner_radius=16, fg_color="transparent",
+                                           hover=False, font=("Arial", 13),
+                                           command=self._descargar_cancion_actual)
+        self.btn_download.pack(side="left", padx=(0, 8))
 
         ctk.CTkLabel(frame_right, text="🔊", font=("Arial", 11),
                      text_color=COLOR_TEXTO_SECUNDARIO).pack(side="left", padx=(0, 4))
 
+        self.lbl_volumen = ctk.CTkLabel(frame_right, text="50%", font=(TIPO_FUENTE, 10),
+                                         text_color=COLOR_TEXTO_SECUNDARIO, width=32)
+        self.lbl_volumen.pack(side="left", padx=(0, 4))
         self.slider_volumen = ctk.CTkSlider(frame_right, from_=0, to=100, height=4,
-                                             button_color=COLOR_ACENTO, progress_color=COLOR_ACENTO,
-                                             button_hover_color=COLOR_BOTON_HOVER,
-                                             command=self.cambiar_volumen, width=80)
+                                              button_color=COLOR_ACENTO, progress_color=COLOR_ACENTO,
+                                              button_hover_color=COLOR_BOTON_HOVER,
+                                              command=self.cambiar_volumen, width=80)
         self.slider_volumen.pack(side="left")
         self.slider_volumen.set(50)
 
@@ -347,7 +368,6 @@ class JuanTuneApp(ctk.CTk):
         # Try to show album art of the first song
         if canciones:
             try:
-                from mutagen.id3 import ID3, APIC
                 audio = ID3(canciones[0])
                 for tag in audio.values():
                     if isinstance(tag, APIC):
@@ -356,8 +376,8 @@ class JuanTuneApp(ctk.CTk):
                         img_ctk = ctk.CTkImage(light_image=img, dark_image=img, size=(160, 160))
                         lbl_album_img.configure(image=img_ctk, text="")
                         break
-            except:
-                pass
+            except Exception as e:
+                print(f"Album art error: {e}")
 
         # Metadata right of album art
         frame_meta = ctk.CTkFrame(h_inner, fg_color="transparent")
@@ -425,33 +445,86 @@ class JuanTuneApp(ctk.CTk):
 
     def cargar_carpeta(self):
         directorio = filedialog.askdirectory()
-        if directorio:
-            primeras = []
-            for archivo in os.listdir(directorio):
-                if archivo.lower().endswith(".mp3"):
-                    ruta_completa = os.path.join(directorio, archivo)
-                    if ruta_completa not in self.playlist:
-                        self.playlist.append(ruta_completa)
-                        self.añadir_a_playlist_ui(ruta_completa)
-                        if self.current_playlist_name:
-                            añadir_cancion_playlist(self.current_playlist_name, ruta_completa)
-                        if not primeras:
-                            primeras.append(ruta_completa)
-            if primeras and not self.reproductor.cancion_actual:
-                self.seleccionar_cancion(primeras[0])
+        if not directorio:
+            return
+        canciones = []
+        for archivo in os.listdir(directorio):
+            if archivo.lower().endswith(".mp3"):
+                canciones.append(os.path.join(directorio, archivo))
+        if not canciones:
+            self._status_text("❌ No se encontraron archivos MP3")
+            return
+        self.playlist = canciones
+        self.current_playlist_name = None
+        self.indice_actual = 0
+        for widget in self.frame_lista.winfo_children():
+            widget.destroy()
+        frame_header = ctk.CTkFrame(self.frame_lista, fg_color=COLOR_FONDO_SECUNDARIO, corner_radius=0)
+        frame_header.pack(fill="x")
+        h_inner = ctk.CTkFrame(frame_header, fg_color="transparent")
+        h_inner.pack(fill="x", padx=30, pady=(25, 20))
+        lbl_album_img = ctk.CTkLabel(h_inner, text="📂", font=("Arial", 48),
+                                     width=160, height=160, fg_color=COLOR_FONDO_PRIMARIO,
+                                     corner_radius=8)
+        lbl_album_img.pack(side="left", padx=(0, 20))
+        frame_meta = ctk.CTkFrame(h_inner, fg_color="transparent")
+        frame_meta.pack(side="left", fill="x", expand=True)
+        ctk.CTkLabel(frame_meta, text="CARPETA",
+                     font=(TIPO_FUENTE, 10, "bold"),
+                     text_color=COLOR_TEXTO_SECUNDARIO).pack(anchor="w")
+        nombre_carpeta = os.path.basename(directorio)
+        ctk.CTkLabel(frame_meta, text=nombre_carpeta,
+                     font=(TIPO_FUENTE, 28, "bold"),
+                     text_color=COLOR_TEXTO_PRINCIPAL).pack(anchor="w", pady=(4, 0))
+        ctk.CTkLabel(frame_meta, text=f"{len(canciones)} canciones",
+                     font=(TIPO_FUENTE, 12),
+                     text_color=COLOR_TEXTO_SECUNDARIO).pack(anchor="w", pady=(6, 0))
+        frame_btn_hdr = ctk.CTkFrame(frame_meta, fg_color="transparent")
+        frame_btn_hdr.pack(anchor="w", pady=(10, 0))
+        ctk.CTkButton(frame_btn_hdr, text="← Volver", fg_color="transparent",
+                      hover_color=COLOR_FONDO_PRIMARIO, font=(TIPO_FUENTE, 12),
+                      command=self.salir_playlist, width=70).pack(side="left", padx=(0, 5))
+        ctk.CTkButton(frame_btn_hdr, text="Cerrar", fg_color="transparent",
+                      hover_color=COLOR_FONDO_PRIMARIO, text_color="#FF5555",
+                      font=(TIPO_FUENTE, 12), command=self._cerrar_playlist_temporal).pack(side="left")
+        frame_acc = ctk.CTkFrame(self.frame_lista, fg_color="transparent")
+        frame_acc.pack(fill="x", padx=24, pady=(12, 6))
+        ctk.CTkButton(frame_acc, text="▶", width=44, height=44, corner_radius=22,
+                      fg_color=COLOR_ACENTO, hover_color=COLOR_BOTON_HOVER,
+                      font=("Arial", 18), command=lambda: self._reproducir_primera()).pack(side="left")
+        self.scroll_playlist = ctk.CTkScrollableFrame(self.frame_lista, fg_color="transparent",
+                                                       scrollbar_button_color=COLOR_ACENTO,
+                                                       scrollbar_button_hover_color=COLOR_BOTON_HOVER,
+                                                       corner_radius=0)
+        self.scroll_playlist.pack(fill="both", expand=True, padx=0, pady=0)
+        frame_cols = ctk.CTkFrame(self.scroll_playlist, fg_color="transparent")
+        frame_cols.pack(fill="x", padx=20, pady=(8, 2))
+        ctk.CTkLabel(frame_cols, text="#", font=(TIPO_FUENTE, 10, "bold"),
+                     text_color=COLOR_TEXTO_SECUNDARIO, width=30).pack(side="left")
+        ctk.CTkLabel(frame_cols, text="Título", font=(TIPO_FUENTE, 10, "bold"),
+                     text_color=COLOR_TEXTO_SECUNDARIO, anchor="w").pack(side="left", fill="x", expand=True, padx=(4, 0))
+        ctk.CTkLabel(frame_cols, text="⏱", font=(TIPO_FUENTE, 10),
+                     text_color=COLOR_TEXTO_SECUNDARIO, width=40).pack(side="right")
+        ctk.CTkFrame(self.scroll_playlist, height=1, fg_color="#333333").pack(fill="x", padx=20, pady=2)
+        for ruta in canciones:
+            self.añadir_a_playlist_ui(ruta)
+        for f in (self.frame_home, self.frame_explorar):
+            f.pack_forget()
+        self.frame_lista.pack(fill="both", expand=True)
+        self.btn_salir_playlist.configure(state="normal")
+        self._reproducir_primera()
 
     def _obtener_mini_caratula(self, ruta, size=32):
         """Retorna un CTkImage con la carátula o None."""
         try:
-            from mutagen.id3 import ID3, APIC
             audio = ID3(ruta)
             for tag in audio.values():
                 if isinstance(tag, APIC):
                     img = Image.open(io.BytesIO(tag.data))
                     img.thumbnail((size, size))
                     return ctk.CTkImage(light_image=img, dark_image=img, size=(size, size))
-        except:
-            pass
+        except Exception as e:
+            print(f"Mini caratula error: {e}")
         return None
 
     def _reproducir_primera(self):
@@ -460,16 +533,20 @@ class JuanTuneApp(ctk.CTk):
 
     def _formatear_duracion(self, ruta):
         try:
-            from mutagen.mp3 import MP3
             audio = MP3(ruta)
             segs = int(audio.info.length)
             return f"{segs // 60}:{segs % 60:02d}"
-        except:
+        except Exception as e:
+            print(f"Duration error: {e}")
             return "0:00"
 
     def añadir_a_playlist_ui(self, ruta):
         """Añade una fila tipo tabla: # | thumbnail | título | artista | duración | ✕"""
-        nombre = os.path.basename(ruta).replace(".mp3", "")
+        cloud_data = self._cloud_song_desde_cache(ruta)
+        if cloud_data:
+            nombre = cloud_data.get("title", cloud_data.get("uploaded_by", ""))
+        else:
+            nombre = os.path.basename(ruta).replace(".mp3", "")
         nombre_trunc = (nombre[:32] + '...') if len(nombre) > 32 else nombre
 
         frame_song = ctk.CTkFrame(self.scroll_playlist, fg_color="transparent", height=44)
@@ -504,13 +581,15 @@ class JuanTuneApp(ctk.CTk):
                                  command=lambda r=ruta: self.seleccionar_cancion(r))
         btn_song.pack(fill="x", ipady=1)
 
-        # Artista (if available)
-        try:
-            from mutagen.id3 import ID3
-            tags = ID3(ruta)
-            artista = str(tags.get("TPE1", ""))
-        except:
-            artista = ""
+        artista = ""
+        if cloud_data:
+            artista = cloud_data.get("artist", cloud_data.get("uploaded_by", ""))
+        if not artista:
+            try:
+                tags = ID3(ruta)
+                artista = str(tags.get("TPE1", ""))
+            except Exception as e:
+                print(f"Tag error: {e}")
         if artista:
             ctk.CTkLabel(frame_info, text=artista, font=(TIPO_FUENTE, 10),
                          text_color=COLOR_TEXTO_SECUNDARIO, anchor="w").pack(fill="x")
@@ -536,30 +615,44 @@ class JuanTuneApp(ctk.CTk):
             self.indice_actual = self.playlist.index(ruta)
         if self.reproductor.cargar_cancion(ruta):
             info = self.reproductor.obtener_info()
+            cloud_data = self._cloud_song_desde_cache(ruta)
+            if cloud_data:
+                info['nombre'] = cloud_data.get("title", info['nombre'])
+                info['artista'] = cloud_data.get("artist", cloud_data.get("uploaded_by", info['artista']))
             nombre_trunc = (info['nombre'][:40] + '...') if len(info['nombre']) > 40 else info['nombre']
             self.lbl_titulo.configure(text=nombre_trunc)
             self.lbl_artista.configure(text=info.get('artista', ''))
             self.duracion_actual = info['duracion']
             self.slider_progreso.configure(to=info['duracion'])
             self.slider_progreso.set(0)
+            self.lbl_tiempo_actual.configure(text="0:00")
+            self.lbl_tiempo_total.configure(text=self._formatear_tiempo(info['duracion']))
 
+            old_img = self._caratula_img
+            self.img_caratula._label.configure(image="")
+            self._caratula_img = None
             img = self.reproductor.obtener_caratula()
             if img:
                 img.thumbnail((56, 56))
-                img_ctk = ctk.CTkImage(light_image=img, dark_image=img, size=(56, 56))
-                self.img_caratula.configure(image=img_ctk, text="")
+                self._caratula_img = ctk.CTkImage(light_image=img, dark_image=img, size=(56, 56))
+                self.img_caratula.configure(image=self._caratula_img, text="")
             else:
-                self.img_caratula.configure(image=None, text="🎵")
+                self.img_caratula.configure(text="🎵")
+            old_img = None
 
             self._stats_ruta = ruta
             self._stats_tiempo = 0.0
+            self._current_download_url = None  # local song, no download URL
 
-            self.reproductor.reproducir()
+            if not self.reproductor.reproducir():
+                self.reproductor.reiniciar_mixer()
+                if not self.reproductor.cargar_cancion(ruta) or not self.reproductor.reproducir():
+                    self._status_text("❌ Error al reproducir")
+                    return
             self.btn_play.configure(text="⏸")
             self._en_modo_player = True
             self.actualizar_barra_tiempo()
-            from data.recent import añadir_reciente
-            añadir_reciente(ruta)
+            añadir_reciente(ruta, titulo=info.get('nombre', ''), artista=info.get('artista', ''))
 
     def mostrar_vista(self, vista):
         """Cambia entre vistas: 'home', 'biblioteca' o 'explorar'."""
@@ -568,6 +661,7 @@ class JuanTuneApp(ctk.CTk):
         if vista == "home":
             self.frame_home.pack(fill="both", expand=True)
         elif vista == "explorar":
+            self._render_explorar()
             self.frame_explorar.pack(fill="both", expand=True)
         else:
             if not self.current_playlist_name:
@@ -615,13 +709,19 @@ class JuanTuneApp(ctk.CTk):
         """Detiene reproducción y regresa al dashboard."""
         self._flush_stats()
         self._stats_ruta = None
+        if self._timer_siguiente:
+            self.after_cancel(self._timer_siguiente)
+            self._timer_siguiente = None
+        self._en_modo_player = False
         if self.reproductor.cancion_actual:
             self.reproductor.pausar()
             self.btn_play.configure(text="▶")
+        self._caratula_img = None
+        self.img_caratula._label.configure(image="")
+        self.img_caratula.configure(text="🎵")
         self.mostrar_vista("home")
         self.lbl_titulo.configure(text="")
         self.lbl_artista.configure(text="")
-        self.img_caratula.configure(image=None, text="🎵")
 
     def seleccionar_desde_home(self, ruta):
         """Selecciona canción desde una tarjeta del dashboard."""
@@ -651,8 +751,6 @@ class JuanTuneApp(ctk.CTk):
 
     def abrir_estadisticas(self):
         """Ventana de estadísticas de reproducción."""
-        from data.stats import cargar_stats, obtener_top, total_plays, total_time, unique_songs
-
         win = ctk.CTkToplevel(self)
         win.title("Estadísticas")
         win.geometry("700x720")
@@ -743,7 +841,6 @@ class JuanTuneApp(ctk.CTk):
     def _flush_stats(self):
         """Guarda el tiempo acumulado de la canción actual en estadísticas."""
         if self._stats_ruta and self._stats_tiempo > 0:
-            from data.stats import registrar_reproduccion
             registrar_reproduccion(self._stats_ruta, self._stats_tiempo)
         self._stats_tiempo = 0.0
 
@@ -771,7 +868,7 @@ class JuanTuneApp(ctk.CTk):
                 self.siguiente_cancion()
                 return  # ⚠ nueva canción ya arrancó su propio timer
         
-        self.after(500, self.actualizar_barra_tiempo)
+        self._timer_siguiente = self.after(500, self.actualizar_barra_tiempo)
 
     def cambiar_volumen(self, valor):
         """Ajusta el volumen del reproductor."""
@@ -818,19 +915,18 @@ class JuanTuneApp(ctk.CTk):
             self.seleccionar_cancion(ruta)
 
     def siguiente_cancion(self):
-        """Salta a la siguiente canción, repite la actual o elige aleatoria."""
+        self._flush_stats()
         if len(self.playlist) > 0:
             if self.repeat_mode:
-                # Repetir la misma canción
                 self.seleccionar_cancion(self.playlist[self.indice_actual])
             elif self.shuffle_mode:
                 self.indice_actual = random.randint(0, len(self.playlist) - 1)
-                nueva_ruta = self.playlist[self.indice_actual]
-                self.seleccionar_cancion(nueva_ruta)
+                self.seleccionar_cancion(self.playlist[self.indice_actual])
             else:
                 self.indice_actual = (self.indice_actual + 1) % len(self.playlist)
-                nueva_ruta = self.playlist[self.indice_actual]
-                self.seleccionar_cancion(nueva_ruta)
+                self.seleccionar_cancion(self.playlist[self.indice_actual])
+        elif self.cloud_songs and self._cloud_playing:
+            self._play_cloud_song(random.choice(self.cloud_songs))
 
     def salir_playlist(self):
         """Sale del modo playlist y vuelve a la biblioteca."""
@@ -842,6 +938,17 @@ class JuanTuneApp(ctk.CTk):
             self.playlist = []
         self.btn_salir_playlist.configure(state="disabled")
         self.mostrar_vista("biblioteca")
+
+    def _cerrar_playlist_temporal(self):
+        """Cierra la playlist temporal de carpeta y vuelve al inicio."""
+        self.reproductor.pausar()
+        self.btn_play.configure(text="▶")
+        self.playlist = []
+        self.indice_actual = 0
+        self.current_playlist_name = None
+        self._current_download_url = None
+        self.btn_salir_playlist.configure(state="disabled")
+        self.mostrar_vista("home")
 
     def abrir_popup_crear_playlist(self):
         """Abre un popup para crear una nueva playlist con sus canciones."""
@@ -936,7 +1043,6 @@ class JuanTuneApp(ctk.CTk):
     def eliminar_cancion_de_playlist(self, ruta):
         """Elimina una canción de la playlist actual y de la UI."""
         if self.current_playlist_name:
-            from data.database import eliminar_cancion_playlist
             eliminar_cancion_playlist(self.current_playlist_name, ruta)
             self.cargar_playlist_a_ui(self.current_playlist_name)
             # Reajustar índice si la canción actual sigue en la playlist
@@ -950,7 +1056,9 @@ class JuanTuneApp(ctk.CTk):
                     self.btn_play.configure(text="▶")
                     self.lbl_titulo.configure(text="")
                     self.lbl_artista.configure(text="")
-                    self.img_caratula.configure(image=None, text="🎵")
+                    self._caratula_img = None
+                    self.img_caratula._label.configure(image="")
+                    self.img_caratula.configure(text="🎵")
                     self._stats_ruta = None
                     self._stats_tiempo = 0.0
 
@@ -979,6 +1087,347 @@ class JuanTuneApp(ctk.CTk):
             self.indice_actual = (self.indice_actual - 1) % len(self.playlist)
             nueva_ruta = self.playlist[self.indice_actual]
             self.seleccionar_cancion(nueva_ruta)
+
+    def _cloud_song_desde_cache(self, ruta_cache):
+        from services.stream_cache import CACHE_DIR
+        if not ruta_cache.startswith(CACHE_DIR) or not self.cloud_songs:
+            return None
+        nombre = os.path.basename(ruta_cache)
+        for s in self.cloud_songs:
+            url = s.get("cloudinary_url", "")
+            if url:
+                import hashlib
+                if hashlib.md5(url.encode()).hexdigest() + ".mp3" == nombre:
+                    return s
+        return None
+
+    def _descargar_cancion_actual(self):
+        dl_url = self._current_download_url
+        if not dl_url:
+            self._mostrar_popup_simple("❌ Sin enlace", "Esta canción no tiene enlace de descarga")
+            return
+        downloads = os.path.join(os.path.expanduser("~"), "Downloads")
+        titulo = self.lbl_titulo.cget("text") or "cancion"
+        nombre = titulo.replace("/", "-").replace("\\", "-") + ".mp3"
+        destino = os.path.join(downloads, nombre)
+
+        popup = ctk.CTkToplevel(self)
+        popup.title("Descargando")
+        popup.geometry("360x180")
+        popup.configure(fg_color=COLOR_FONDO_PRIMARIO)
+        popup.transient(self)
+        popup.grab_set()
+
+        ctk.CTkLabel(popup, text="⬇️ Descargando...", font=(TIPO_FUENTE, 18, "bold"),
+                     text_color=COLOR_ACENTO).pack(pady=(35, 10))
+        ctk.CTkLabel(popup, text="La canción se está guardando en tu PC",
+                     font=(TIPO_FUENTE, 12), text_color=COLOR_TEXTO_SECUNDARIO).pack()
+        progress = ctk.CTkProgressBar(popup, mode="indeterminate",
+                                      fg_color=COLOR_FONDO_SECUNDARIO,
+                                      progress_color=COLOR_ACENTO)
+        progress.pack(pady=15, padx=40)
+        progress.start()
+
+        def _task():
+            import urllib.request
+            try:
+                urllib.request.urlretrieve(dl_url, destino)
+                self.after(0, lambda: self._mostrar_popup_descarga_exito(popup, destino))
+            except Exception as e:
+                self.after(0, lambda: self._mostrar_popup_descarga_error(popup, str(e)))
+
+        threading.Thread(target=_task, daemon=True).start()
+
+    def _mostrar_popup_simple(self, titulo, mensaje):
+        popup = ctk.CTkToplevel(self)
+        popup.title(titulo)
+        popup.geometry("320x140")
+        popup.configure(fg_color=COLOR_FONDO_PRIMARIO)
+        popup.transient(self)
+        popup.grab_set()
+        ctk.CTkLabel(popup, text=titulo, font=(TIPO_FUENTE, 16, "bold"),
+                     text_color=COLOR_ACENTO).pack(pady=(25, 8))
+        ctk.CTkLabel(popup, text=mensaje, font=(TIPO_FUENTE, 12),
+                     text_color=COLOR_TEXTO_SECUNDARIO).pack(pady=(0, 15))
+        ctk.CTkButton(popup, text="Cerrar", width=90,
+                      fg_color=COLOR_ACENTO, hover_color=COLOR_BOTON_HOVER,
+                      command=popup.destroy).pack()
+
+    def _mostrar_popup_descarga_exito(self, popup, destino):
+        for w in popup.winfo_children():
+            w.destroy()
+        ctk.CTkLabel(popup, text="✅ Descarga completada", font=(TIPO_FUENTE, 18, "bold"),
+                     text_color=COLOR_ACENTO).pack(pady=(25, 5))
+        ctk.CTkLabel(popup, text=f"Guardado en:\n{destino}", font=(TIPO_FUENTE, 12),
+                     text_color=COLOR_TEXTO_SECUNDARIO, wraplength=320).pack(pady=(0, 12))
+        ctk.CTkButton(popup, text="Cerrar", width=90,
+                      fg_color=COLOR_ACENTO, hover_color=COLOR_BOTON_HOVER,
+                      command=popup.destroy).pack()
+
+    def _mostrar_popup_descarga_error(self, popup, error):
+        for w in popup.winfo_children():
+            w.destroy()
+        ctk.CTkLabel(popup, text="❌ Error al descargar", font=(TIPO_FUENTE, 18, "bold"),
+                     text_color="#EF4444").pack(pady=(25, 8))
+        ctk.CTkLabel(popup, text=error, font=(TIPO_FUENTE, 12),
+                     text_color=COLOR_TEXTO_SECUNDARIO, wraplength=320).pack(pady=(0, 12))
+        ctk.CTkButton(popup, text="Cerrar", width=90,
+                      fg_color=COLOR_ACENTO, hover_color=COLOR_BOTON_HOVER,
+                      command=popup.destroy).pack()
+
+    def _añadir_cloud_a_playlist(self, song_data):
+        from services.stream_cache import is_cached, get_cached_path, download_async
+        url = song_data.get("cloudinary_url", "")
+        if not url:
+            self._status_text("❌ Sin URL de streaming")
+            return
+        if is_cached(url):
+            self._añadir_ruta_a_playlist(get_cached_path(url))
+        else:
+            self._status_text("⬇️ Descargando para añadir a playlist...")
+            download_async(url, on_done=lambda p: self.after(0, lambda: self._añadir_ruta_a_playlist(p)))
+
+    def _añadir_ruta_a_playlist(self, ruta):
+        nombres = [p["name"] for p in self.playlists_data["playlists"]]
+        if not nombres:
+            from tkinter import messagebox
+            messagebox.showinfo("Sin playlists", "Crea una playlist primero en la barra lateral")
+            return
+        top = ctk.CTkToplevel(self)
+        top.title("Añadir a playlist")
+        top.geometry("300x280")
+        top.configure(fg_color=COLOR_FONDO_PRIMARIO)
+        top.transient(self)
+        top.grab_set()
+        ctk.CTkLabel(top, text="Elige una playlist:", font=(TIPO_FUENTE, 16, "bold"),
+                     text_color=COLOR_ACENTO).pack(pady=20)
+        for p in self.playlists_data["playlists"]:
+            n = p["name"]
+            ctk.CTkButton(top, text=n, fg_color=COLOR_FONDO_SECUNDARIO,
+                          hover_color=COLOR_ACENTO,
+                          command=lambda nn=n, rr=ruta: [self._do_add_to_playlist(nn, rr), top.destroy()]
+                          ).pack(fill="x", padx=20, pady=4)
+        ctk.CTkButton(top, text="Cancelar", fg_color="transparent",
+                      command=top.destroy).pack(pady=(20, 10))
+
+    def _do_add_to_playlist(self, nombre, ruta):
+        for p in self.playlists_data["playlists"]:
+            if p["name"] == nombre:
+                if ruta not in p["songs"]:
+                    p["songs"].append(ruta)
+                    guardar_playlists(self.playlists_data)
+                self._status_text(f"✅ Añadida a {nombre}")
+                return
+
+    def _status_text(self, texto):
+        if hasattr(self, 'lbl_subtitulo'):
+            self.lbl_subtitulo.configure(text=texto)
+
+    def _hay_internet(self):
+        import urllib.request, urllib.error
+        try:
+            urllib.request.urlopen("http://clients3.google.com/generate_204", timeout=3)
+            return True
+        except urllib.error.URLError:
+            return False
+
+    def _cache_art_desde_img(self, img, song_data):
+        url = song_data.get("cloudinary_url", "")
+        if not url:
+            return
+        import hashlib
+        from services.stream_cache import CACHE_DIR
+        art_path = os.path.join(CACHE_DIR, hashlib.md5(url.encode()).hexdigest() + "_art.png")
+        if not os.path.exists(art_path):
+            try:
+                img_copy = img.copy()
+                img_copy.thumbnail((140, 140))
+                img_copy.save(art_path)
+            except:
+                pass
+
+    def _caratula_desde_cache(self, s):
+        url = s.get("cloudinary_url", "")
+        if not url:
+            return None
+        import hashlib
+        from services.stream_cache import CACHE_DIR
+        art_path = os.path.join(CACHE_DIR, hashlib.md5(url.encode()).hexdigest() + "_art.png")
+        if os.path.exists(art_path):
+            try:
+                img = Image.open(art_path)
+                return ctk.CTkImage(light_image=img, dark_image=img, size=(140, 140))
+            except:
+                pass
+        from services.stream_cache import is_cached, get_cached_path
+        ruta = get_cached_path(url) if is_cached(url) else None
+        if not ruta:
+            return None
+        try:
+            audio = ID3(ruta)
+            for tag in audio.values():
+                if isinstance(tag, APIC):
+                    img = Image.open(io.BytesIO(tag.data))
+                    img.thumbnail((140, 140))
+                    try:
+                        img.save(art_path)
+                    except:
+                        pass
+                    return ctk.CTkImage(light_image=img, dark_image=img, size=(140, 140))
+        except Exception as e:
+            print(f"Cache art error: {e}")
+        return None
+
+    def _play_cloud_song(self, song_data):
+        if not self._hay_internet():
+            self._status_text("❌ Sin conexión a internet")
+            return
+        url = song_data.get("cloudinary_url", "")
+        if not url:
+            self._status_text("❌ Sin URL de streaming")
+            return
+        # Kill old timer & stop current playback before switching
+        if hasattr(self, '_timer_siguiente') and self._timer_siguiente:
+            self.after_cancel(self._timer_siguiente)
+            self._timer_siguiente = None
+        self._flush_stats()
+        self.reproductor.pausar()
+        self.btn_play.configure(text="▶")
+
+        self.lbl_tiempo_actual.configure(text="0:00")
+        self.slider_progreso.set(0)
+        self.lbl_titulo.configure(text=song_data.get("title", "Cargando..."))
+        self.lbl_artista.configure(text="☁️ Descargando...")
+        old_img = self._caratula_img
+        self._caratula_img = None
+        self.img_caratula._label.configure(image="")
+        self.img_caratula.configure(text="☁️")
+        old_img = None
+        self._cloud_playing = True
+        from services.stream_cache import is_cached, get_cached_path, download_async
+
+        def on_ready(local_path):
+            self.after(0, lambda p=local_path: self._on_cloud_ready(p, song_data))
+
+        if is_cached(url):
+            on_ready(get_cached_path(url))
+        else:
+            download_async(url, on_done=on_ready)
+
+    def _on_cloud_ready(self, local_path, song_data):
+        self._flush_stats()
+        if not local_path:
+            self._status_text("❌ Error de descarga")
+            self.lbl_artista.configure(text="")
+            return
+        if self.reproductor.cargar_cancion(local_path):
+            info = self.reproductor.obtener_info()
+            titulo = song_data.get("title", info.get("nombre", ""))
+            artista = song_data.get("artist", info.get("artista", ""))
+            self.lbl_titulo.configure(text=titulo[:40] if len(titulo) > 40 else titulo)
+            self.lbl_artista.configure(text=artista)
+            self.duracion_actual = info["duracion"]
+            self.slider_progreso.configure(to=info["duracion"])
+            self.slider_progreso.set(0)
+            self.lbl_tiempo_actual.configure(text="0:00")
+            self.lbl_tiempo_total.configure(text=self._formatear_tiempo(info["duracion"]))
+            old_img = self._caratula_img
+            self.img_caratula._label.configure(image="")
+            self._caratula_img = None
+            img = self.reproductor.obtener_caratula()
+            if img:
+                img.thumbnail((56, 56))
+                self._caratula_img = ctk.CTkImage(light_image=img, dark_image=img, size=(56, 56))
+                self.img_caratula.configure(image=self._caratula_img, text="")
+                self._cache_art_desde_img(img, song_data)
+            else:
+                self.img_caratula.configure(text="🎵")
+            old_img = None
+            self.playlist = [local_path]
+            self.indice_actual = 0
+            self._stats_ruta = local_path
+            self._stats_tiempo = 0.0
+            self._current_download_url = song_data.get("download_url")
+            if not self.reproductor.reproducir():
+                self.reproductor.reiniciar_mixer()
+                if not self.reproductor.cargar_cancion(local_path) or not self.reproductor.reproducir():
+                    self._status_text("❌ Error al reproducir")
+                    return
+            self.btn_play.configure(text="⏸")
+            self._en_modo_player = True
+            self.actualizar_barra_tiempo()
+            añadir_reciente(local_path, titulo=titulo, artista=artista)
+
+    def _render_explorar(self):
+        for w in self.frame_explorar.winfo_children():
+            w.destroy()
+        if not self.cloud_songs:
+            ctk.CTkLabel(self.frame_explorar, text="☁️ Explorar", font=(TIPO_FUENTE, 26, "bold"),
+                         text_color=COLOR_ACENTO).pack(pady=(30, 5))
+            progress = ctk.CTkProgressBar(self.frame_explorar, mode="indeterminate",
+                                          fg_color=COLOR_FONDO_SECUNDARIO,
+                                          progress_color=COLOR_ACENTO)
+            progress.pack(pady=20, padx=40)
+            progress.start()
+            ctk.CTkLabel(self.frame_explorar, text="Cargando canciones de la nube...",
+                         font=(TIPO_FUENTE, 12), text_color=COLOR_TEXTO_SECUNDARIO).pack()
+            self.after(100, lambda: self._cargar_cloud_songs(lambda: self._render_explorar()))
+            return
+        ctk.CTkLabel(self.frame_explorar, text="☁️ Explorar", font=(TIPO_FUENTE, 26, "bold"),
+                     text_color=COLOR_ACENTO).pack(pady=(30, 20))
+        cols = max(2, min(4, self.winfo_width() // 280))
+        row_frame = None
+        for i, s in enumerate(self.cloud_songs):
+            if i % cols == 0:
+                row_frame = ctk.CTkFrame(self.frame_explorar, fg_color="transparent")
+                row_frame.pack(fill="x", pady=4)
+            card = ctk.CTkFrame(row_frame, fg_color=COLOR_FONDO_SECUNDARIO, corner_radius=12, height=280)
+            card.pack(side="left", fill="x", expand=True, padx=4)
+            card.pack_propagate(False)
+            img = self._caratula_desde_cache(s)
+            if img:
+                lbl_img = ctk.CTkLabel(card, image=img, text="")
+            else:
+                lbl_img = ctk.CTkLabel(card, text="🎵", font=("Arial", 48))
+            lbl_img.pack(pady=(16, 6))
+            titulo = s.get("title", "Sin título")
+            ctk.CTkLabel(card, text=titulo[:30], font=(TIPO_FUENTE, 13, "bold"),
+                         text_color=COLOR_TEXTO_PRINCIPAL).pack()
+            artista = s.get("artist", s.get("uploaded_by", ""))
+            ctk.CTkLabel(card, text=artista[:25], font=(TIPO_FUENTE, 11),
+                         text_color=COLOR_TEXTO_SECUNDARIO).pack(pady=(0, 8))
+            btn_row = ctk.CTkFrame(card, fg_color="transparent")
+            btn_row.pack(pady=(4, 14))
+            ctk.CTkButton(btn_row, text="▶", width=70, height=40, corner_radius=20,
+                          fg_color=COLOR_ACENTO, hover_color=COLOR_BOTON_HOVER,
+                          font=("Arial", 16),
+                          command=lambda sd=s: self._play_cloud_song(sd)).pack(side="left", padx=6)
+            ctk.CTkButton(btn_row, text="➕", width=70, height=40, corner_radius=20,
+                          fg_color=COLOR_FONDO_SECUNDARIO, hover_color=COLOR_ACENTO,
+                          font=("Arial", 16),
+                          command=lambda sd=s: self._añadir_cloud_a_playlist(sd)).pack(side="left", padx=6)
+
+    def _cargar_cloud_songs(self, callback):
+        from services.cloud_cache import is_cache_valid, get_cached_songs, save_cloud_cache
+
+        if is_cache_valid():
+            self._on_cloud_loaded(get_cached_songs(), callback)
+            return
+
+        def _run():
+            try:
+                lista = get_all_songs()
+                save_cloud_cache(lista)
+                self.after(0, lambda: self._on_cloud_loaded(lista, callback))
+            except Exception as e:
+                print(f"Cloud load error: {e}")
+                cached = get_cached_songs()
+                self.after(0, lambda: self._on_cloud_loaded(cached, callback))
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _on_cloud_loaded(self, lista, callback):
+        self.cloud_songs = lista or []
+        callback()
 
 if __name__ == "__main__":
     app = JuanTuneApp()

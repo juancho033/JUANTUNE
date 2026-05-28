@@ -10,7 +10,7 @@ def cargar_stats():
         try:
             with open(STATS_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
+        except Exception:
             return {}
     return {}
 

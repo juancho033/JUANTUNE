@@ -11,7 +11,7 @@ def cargar_playlists():
         try:
             with open(PLAYLISTS_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
+        except Exception:
             return {"playlists": []}
     return {"playlists": []}
 

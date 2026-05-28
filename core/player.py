@@ -1,4 +1,3 @@
-# core/player.py
 import pygame
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, APIC
@@ -15,64 +14,91 @@ class ReproductorAudio:
         self.posicion_base = 0
         self.duracion = 0
         self.volumen = 0.5
-        # tiempo_inicio_reproduccion: momento exacto (time.time()) en que inició la sesión actual
-        # (ya sea play normal o después de un seek)
         self.tiempo_inicio_reproduccion = 0
         pygame.mixer.music.set_volume(self.volumen)
 
-    def cargar_cancion(self, ruta_archivo):
-        if os.path.exists(ruta_archivo):
-            try:
-                audio = MP3(ruta_archivo)
-                duracion = audio.info.length
-            except Exception:
-                return False
+    def reiniciar_mixer(self):
+        try:
             pygame.mixer.music.stop()
-            self.cancion_actual = ruta_archivo
+            if hasattr(pygame.mixer.music, 'unload'):
+                pygame.mixer.music.unload()
+            pygame.mixer.quit()
+            time.sleep(0.05)
+            pygame.mixer.pre_init(44100, -16, 2, 2048)
+            pygame.mixer.init()
+            pygame.mixer.music.set_volume(self.volumen)
+        except Exception as e:
+            print(f"Mixer error: {e}")
+
+    def cargar_cancion(self, ruta_archivo):
+        if not os.path.exists(ruta_archivo) or os.path.getsize(ruta_archivo) == 0:
+            return False
+        try:
+            audio = MP3(ruta_archivo)
+            duracion = audio.info.length
+        except Exception as e:
+            print(f"MP3 error: {e}")
+            return False
+        self.cancion_actual = ruta_archivo
+        # stop + unload + small delay to let SDL release resources before loading new file
+        pygame.mixer.music.stop()
+        if hasattr(pygame.mixer.music, 'unload'):
+            pygame.mixer.music.unload()
+        time.sleep(0.05)
+        try:
             pygame.mixer.music.load(ruta_archivo)
-            self.posicion_base = 0
-            self.en_pausa = False
-            self.duracion = duracion
-            self.tiempo_inicio_reproduccion = time.time()
-            return True
-        return False
+        except pygame.error:
+            self.reiniciar_mixer()
+            try:
+                pygame.mixer.music.load(ruta_archivo)
+            except pygame.error:
+                return False
+        self.posicion_base = 0
+        self.en_pausa = False
+        self.duracion = duracion
+        self.tiempo_inicio_reproduccion = 0
+        return True
 
     def reproducir(self):
-        if self.en_pausa:
-            pygame.mixer.music.play(0, self.posicion_base)
-        else:
-            pygame.mixer.music.play()
+        start = 0 if not self.en_pausa else self.posicion_base
+        if not self.en_pausa:
             self.posicion_base = 0
+        try:
+            pygame.mixer.music.play(0, start)
+        except pygame.error as e:
+            print(f"Play error: {e}")
+            return False
         self.en_pausa = False
-        self.tiempo_inicio_reproduccion = time.time() - self.posicion_base
+        self.tiempo_inicio_reproduccion = time.time() - start
+        return True
 
     def pausar(self):
-        self.posicion_base = self.obtener_tiempo_actual()
-        pygame.mixer.music.pause()
-        self.en_pausa = True
+        if self.cancion_actual:
+            self.posicion_base = self.obtener_tiempo_actual()
+            pygame.mixer.music.pause()
+            self.en_pausa = True
 
     def saltar_a(self, segundos):
-        """Mueve la reproducción al segundo indicado."""
-        if self.cancion_actual:
-            self.posicion_base = segundos
+        if not self.cancion_actual:
+            return False
+        self.posicion_base = segundos
+        try:
             pygame.mixer.music.play(0, segundos)
-            # CRÍTICO: tiempo_inicio_reproduccion debe ser AHORA MENOS los segundos
-            # Para que obtener_tiempo_actual() = segundos + (tiempo_actual - (ahora - segundos))
-            self.tiempo_inicio_reproduccion = time.time() - segundos
-            if self.en_pausa:
-                pygame.mixer.music.pause()
-            return True
-        return False
+        except pygame.error:
+            return False
+        self.tiempo_inicio_reproduccion = time.time() - segundos
+        if self.en_pausa:
+            pygame.mixer.music.pause()
+        return True
 
     def obtener_caratula(self):
-        """Extrae la imagen del MP3. Retorna un objeto PIL Image o None."""
         try:
             audio = ID3(self.cancion_actual)
             for tag in audio.values():
                 if isinstance(tag, APIC):
                     return Image.open(io.BytesIO(tag.data))
-        except:
-            pass
+        except Exception as e:
+            print(f"Album art error: {e}")
         return None
 
     def obtener_info(self):
@@ -80,7 +106,8 @@ class ReproductorAudio:
             try:
                 audio = MP3(self.cancion_actual)
                 duracion = audio.info.length
-            except Exception:
+            except Exception as e:
+                print(f"Info error: {e}")
                 duracion = 0
             try:
                 tags = ID3(self.cancion_actual)
@@ -95,22 +122,19 @@ class ReproductorAudio:
         return None
 
     def obtener_tiempo_actual(self):
-        """Obtiene el tiempo actual usando pygame.get_pos() (más confiable)."""
         if self.en_pausa:
             return self.posicion_base
-        
-        # Usar get_pos() como fuente principal (devuelve milisegundos)
-        pos = pygame.mixer.music.get_pos()
-        if pos > 0:
-            # get_pos() devuelve el tiempo desde que se inició el play actual
-            return min(self.posicion_base + (pos / 1000.0), self.duracion)
-        
-        # Si get_pos() es -1, la canción terminó
-        if pos == -1:
-            return self.duracion
-            
-        # Respaldo: usar tiempo del sistema (tiempo_inicio ya compensa posicion_base)
-        return min(time.time() - self.tiempo_inicio_reproduccion, self.duracion)
+        try:
+            pos = pygame.mixer.music.get_pos()
+            if pos > 0:
+                return min(self.posicion_base + (pos / 1000.0), self.duracion)
+            if pos == -1:
+                return self.duracion
+        except:
+            pass
+        if self.tiempo_inicio_reproduccion > 0:
+            return min(time.time() - self.tiempo_inicio_reproduccion, self.duracion)
+        return 0
 
     def set_volumen(self, v):
         self.volumen = v
