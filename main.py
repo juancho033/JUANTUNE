@@ -25,7 +25,10 @@ class JuanTuneApp(ctk.CTk):
         self.geometry(f"{ANCHO_APP}x{ALTO_APP}")
         self.configure(fg_color=COLOR_FONDO_PRIMARIO)
         try:
-            self.iconbitmap("assets/icons/logo-ico.ico")
+            from data.paths import get_app_dir
+            ico = os.path.join(get_app_dir(), "assets", "icons", "logo-ico.ico")
+            if os.path.exists(ico):
+                self.iconbitmap(ico)
         except Exception:
             pass
 

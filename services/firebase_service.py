@@ -2,9 +2,10 @@ import json, os
 import urllib.request
 import urllib.error
 import urllib.parse
+from data.paths import get_app_dir
 
 def _load_config():
-    cfg = os.path.join(os.path.dirname(os.path.dirname(__file__)), "firebase_config.json")
+    cfg = os.path.join(get_app_dir(), "firebase_config.json")
     with open(cfg) as f:
         return json.load(f)
 

@@ -3,8 +3,9 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+from data.paths import get_app_dir
 
-CONFIG_DIR = os.path.dirname(os.path.dirname(__file__))
+CONFIG_DIR = get_app_dir()
 CLIENT_SECRET = os.path.join(CONFIG_DIR, "drive_oauth.json")
 TOKEN_PATH = os.path.join(CONFIG_DIR, "drive_token.json")
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]

@@ -1,6 +1,7 @@
 import json, os, cloudinary, cloudinary.uploader
+from data.paths import get_app_dir
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cloudinary_config.json")
+CONFIG_PATH = os.path.join(get_app_dir(), "cloudinary_config.json")
 
 def _init():
     with open(CONFIG_PATH) as f:

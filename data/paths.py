@@ -1,6 +1,12 @@
 import os
 import sys
 
+def get_app_dir():
+    """Retorna la carpeta donde está el .exe (o el script si es desarrollo)."""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 def get_data_dir():
     """Retorna la carpeta de datos del usuario (no se mezcla con el .exe)."""
     if sys.platform == 'win32':
