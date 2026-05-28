@@ -3,11 +3,17 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from data.paths import get_app_dir
+from data.paths import get_app_dir, get_data_dir
 
-CONFIG_DIR = get_app_dir()
-CLIENT_SECRET = os.path.join(CONFIG_DIR, "drive_oauth.json")
-TOKEN_PATH = os.path.join(CONFIG_DIR, "drive_token.json")
+def _find_config(name):
+    for d in (get_app_dir(), get_data_dir(), os.getcwd()):
+        p = os.path.join(d, name)
+        if os.path.exists(p):
+            return p
+    return os.path.join(get_app_dir(), name)
+
+CLIENT_SECRET = _find_config("drive_oauth.json")
+TOKEN_PATH = _find_config("drive_token.json")
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
 def _get_credentials():

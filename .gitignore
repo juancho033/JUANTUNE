@@ -3,7 +3,6 @@
 
 # Build de PyInstaller
 build/
-*.spec
 JuanTune.exe
 
 # Datos personales del usuario (cada uno tiene los suyos en %APPDATA%)

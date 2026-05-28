@@ -2,9 +2,9 @@ import os
 import sys
 
 def get_app_dir():
-    """Retorna la carpeta donde está el .exe (o el script si es desarrollo)."""
-    if getattr(sys, 'frozen', False):
-        return os.path.dirname(sys.executable)
+    """Retorna sys._MEIPASS si está empaquetado, o la raíz del proyecto."""
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        return sys._MEIPASS
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def get_data_dir():
